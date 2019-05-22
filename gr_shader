@@ -1,0 +1,290 @@
+//this is in graphics.cpp
+
+#include "Graphics.h"
+
+bool Graphics::Init(HWND hWnd, int width, int height)
+{
+	if (!InitDirectX(hWnd, width, height))
+	{
+		return false;
+	}
+
+	if (!InitShaders())
+	{
+		return false;
+	}
+
+	if (!InitScene())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+void Graphics::RenderFrame()
+{
+#pragma region BackGroundColor
+	static float color = 0.0f;
+	static bool creste = true;
+	BackGroundColor(color, 0.0f, 0.0f, 1.0f);
+	if (creste)
+		color += 0.01f;
+	else
+		color -= 0.01;
+
+	if (color >= 1.0f)
+		creste = false;
+	else if (color <= 0.0f)
+		creste = true;
+#pragma endregion
+
+	deviceContext->IASetInputLayout(vertexShader.GetInputLayout());
+
+	deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY::D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+
+	deviceContext->VSSetShader(vertexShader.GetShader(), NULL, 0);
+
+	deviceContext->PSSetShader(pixelShader.GetShader(), NULL, 0);
+
+	UINT stride = sizeof(Vertex);
+	UINT offset = 0;
+
+	deviceContext->IASetVertexBuffers(0, 1, vertexBuffer.GetAddressOf(), &stride, &offset);
+
+	deviceContext->Draw(4, 0);
+
+	swapChain->Present(1, NULL);
+}
+
+void Graphics::BackGroundColor(const float& blue,const float& green,const float& red,const float& alpha)
+{
+	float backgroundColor[] = { red,green,blue,alpha };
+
+	deviceContext->ClearRenderTargetView(renderTargetView.Get(), backgroundColor);
+}
+
+bool Graphics::InitDirectX(HWND hWnd, int width, int height)
+{
+	std::vector<DataAdapter> adapters = AdapterReader::GetAdapters();
+
+	if (adapters.empty())
+		return false;
+
+	DXGI_SWAP_CHAIN_DESC scd;
+	ZeroMemory(&scd, sizeof(DXGI_SWAP_CHAIN_DESC));
+
+	scd.BufferDesc.Width = width;
+	scd.BufferDesc.Height = height;
+	scd.BufferDesc.RefreshRate.Numerator = 60;
+	scd.BufferDesc.RefreshRate.Denominator = 1;
+	scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+	scd.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+	scd.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+
+	scd.SampleDesc.Count = 1;
+	scd.SampleDesc.Quality = 0;
+
+	scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	scd.BufferCount = 1;
+	scd.OutputWindow = hWnd;
+	scd.Windowed = TRUE;
+
+	scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+	scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+
+	HRESULT hr;
+	hr = D3D11CreateDeviceAndSwapChain(
+		adapters[0].pAdapter,
+		D3D_DRIVER_TYPE_UNKNOWN,
+		NULL, //For Software / driver TYPE
+		NULL, //Flags for runtime layers
+		NULL, //FEATURE LEVELS ARRAY
+		0,
+		D3D11_SDK_VERSION,
+		&scd,
+		swapChain.GetAddressOf(),
+		device.GetAddressOf(),
+		NULL,
+		deviceContext.GetAddressOf()
+	);
+
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
+	hr = swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backBuffer.GetAddressOf()));
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	hr = device->CreateRenderTargetView(backBuffer.Get(), NULL, renderTargetView.GetAddressOf());
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	deviceContext->OMSetRenderTargets(1, renderTargetView.GetAddressOf(), NULL);
+
+	D3D11_VIEWPORT vp;
+	ZeroMemory(&vp, sizeof(D3D11_VIEWPORT));
+
+	vp.TopLeftX = 0;
+	vp.TopLeftY = 0;
+	vp.Width = width;
+	vp.Height = height;
+
+	deviceContext->RSSetViewports(1, &vp);
+
+	return true;
+}
+
+bool Graphics::InitShaders()
+{
+	std::wstring filePath = L"";
+
+#pragma region DeterminateShaderPath
+	if (IsDebuggerPresent() == TRUE)
+	{
+#ifdef _DEBUG
+		filePath = L"..\\Debug\\";
+#else // Release Mode
+		filePath = L"..\\Release\\";
+#endif // _DEBUG
+	}
+
+	filePath += L"VertexShader.cso";
+
+	D3D11_INPUT_ELEMENT_DESC layout[]
+	{
+		{ "position", 0, DXGI_FORMAT::DXGI_FORMAT_R32G32_FLOAT, 0, 0 , D3D11_INPUT_CLASSIFICATION::D3D11_INPUT_PER_INSTANCE_DATA, 0 },
+	};
+
+	UINT numElements = ARRAYSIZE(layout);
+
+	if (!vertexShader.Init(device, filePath, layout, numElements))
+		return false;
+
+	filePath = L"";
+
+#pragma region DeterminateShaderPath
+	if (IsDebuggerPresent() == TRUE)
+	{
+#ifdef _DEBUG
+		filePath = L"..\\Debug\\";
+#else // Release Mode
+		filePath = L"..\\Release\\";
+#endif // _DEBUG
+	}
+
+	filePath += L"PixelShader.cso";
+
+	if (!pixelShader.Init(device, filePath))
+		return false;
+
+
+	return true;
+}
+
+bool Graphics::InitScene()
+{
+	std::vector<Vertex> vertices;
+
+	vertices.push_back({ 0.0f, 0.0f });
+	vertices.push_back({ -0.5f, 0.0f });
+	vertices.push_back({ 0.5f, 0.0f });
+	vertices.push_back({ 0.0f, 0.5f });
+
+	D3D11_BUFFER_DESC vertex_buffer_desc;
+	ZeroMemory(&vertex_buffer_desc, sizeof(vertex_buffer_desc));
+
+	vertex_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
+	vertex_buffer_desc.ByteWidth = UINT(sizeof(Vertex) * vertices.size());
+	vertex_buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	vertex_buffer_desc.CPUAccessFlags = 0;
+	vertex_buffer_desc.MiscFlags = 0;
+
+	D3D11_SUBRESOURCE_DATA subre_source_data;
+	ZeroMemory(&subre_source_data, sizeof(subre_source_data));
+	subre_source_data.pSysMem = vertices.data();
+
+	HRESULT hr = device->CreateBuffer(
+		&vertex_buffer_desc,
+		&subre_source_data,
+		vertexBuffer.GetAddressOf()
+	);
+
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	return true;
+}
+
+
+//this is in shader.cpp
+
+#include "Shaders.h"
+
+bool VertexShader::Init(Microsoft::WRL::ComPtr<ID3D11Device>& device, std::wstring & shaderPath, D3D11_INPUT_ELEMENT_DESC* layout_desc, UINT numElements)
+{
+	HRESULT hr = D3DReadFileToBlob(shaderPath.c_str(), &shaderBuffer);
+
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	hr = device->CreateVertexShader(
+		shaderBuffer->GetBufferPointer(),
+		shaderBuffer->GetBufferSize(),
+		NULL,
+		vertexShader.GetAddressOf()
+		);
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	hr = device->CreateInputLayout(
+		layout_desc,
+		numElements,
+		shaderBuffer->GetBufferPointer(),
+		shaderBuffer->GetBufferSize(),
+		inputlayout.GetAddressOf()
+	);
+
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	return true;
+}
+
+bool PixelShader::Init(Microsoft::WRL::ComPtr<ID3D11Device> &device, std::wstring& shaderPath)
+{
+	HRESULT hr = D3DReadFileToBlob(shaderPath.c_str(), shaderBuffer.GetAddressOf());
+
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	hr = device->CreatePixelShader(
+		shaderBuffer->GetBufferPointer(),
+		shaderBuffer->GetBufferSize(),
+		NULL,
+		pixelShader.GetAddressOf());
+
+	if (FAILED(hr))
+	{
+		throw GRAPHICS_LAST_EXCEPT();
+	}
+
+	return true;
+}
